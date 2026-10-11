@@ -1,0 +1,38 @@
+[Unit]
+Description=Yinli Logistics Warehouse-Delivery Coordination Platform
+Documentation=file://@APP_DIR@/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=-@ENV_FILE@
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=PYTHONUTF8=1
+Environment=LANG=C.UTF-8
+# 监听地址、端口、数据目录等全部来自 deploy/platform.env，
+# 未设置时使用 server.py 内置默认值（127.0.0.1:8787）。
+ExecStart=@VENV_DIR@/bin/python @APP_DIR@/server.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@SERVICE_NAME@
+
+# 基础加固：应用只读代码与数据，不需要写文件系统
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+﻿code,name,category,unit_price,density_t_per_m3,temp_min,temp_max,mix_group,loss_rate
+ginger,生姜,姜蒜,3.0,0.5,0,15,ginger_garlic,0.008
+garlic,大蒜,姜蒜,3.2,0.5,0,15,ginger_garlic,0.008
+noodles,鲜面条,鲜面条,3.5,0.35,0,4,noodles,0.008

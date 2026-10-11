@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 银犁物流仓配一体化协同平台</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/admin.css">
+<style>
+  body.login{margin:0;min-height:100vh;display:grid;place-items:center;font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif;
+    background:linear-gradient(120deg,#0f2740,#174b73 55%,#127f83);color:#eaf4ff}
+  .login-card{width:min(920px,94vw);display:grid;grid-template-columns:1.05fr .95fr;background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.16);border-radius:22px;overflow:hidden;box-shadow:0 30px 70px rgba(6,20,34,.45);backdrop-filter:blur(6px)}
+  .login-intro{padding:38px 34px;background:linear-gradient(150deg,rgba(9,32,52,.75),rgba(11,74,86,.55))}
+  .login-intro .mark{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#45d0c5,#7dc7ff);
+    display:grid;place-items:center;font-weight:900;color:#0f2740;font-size:20px}
+  .login-intro h1{font-size:22px;margin:18px 0 8px}
+  .login-intro p{margin:0;color:#bcdfe9;font-size:13px;line-height:1.9}
+  .login-intro ul{margin:18px 0 0;padding-left:18px;color:#a8d3e0;font-size:12.5px;line-height:2}
+  .login-form{padding:38px 34px;background:rgba(255,255,255,.97);color:#17324d}
+  .login-form h2{margin:0 0 6px;font-size:19px;color:#102a43}
+  .login-form .sub{font-size:12px;color:#64748b;margin-bottom:20px}
+  .login-form label{display:block;font-size:12px;font-weight:800;color:#64748b;margin:14px 0 6px}
+  .login-form input{width:100%;padding:12px 13px;border:1px solid #dbe6f0;border-radius:12px;background:#f8fbfe;font-size:14px}
+  .login-form input:focus{outline:2px solid #bfe0f5;background:#fff}
+  .login-form button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;font-weight:900;font-size:15px;color:#fff;
+    background:linear-gradient(135deg,#2367a8,#19a7a0);cursor:pointer}
+  .login-form button:disabled{opacity:.6;cursor:not-allowed}
+  .login-error{margin-top:14px;padding:11px 13px;border-radius:11px;background:#fdecea;color:#a52a1e;font-size:13px;display:none}
+  .login-tip{margin-top:16px;font-size:12px;color:#8595a8;line-height:1.8}
+  @media(max-width:820px){.login-card{grid-template-columns:1fr}.login-intro{display:none}}
+</style>
+</head>
+<body class="login">
+  <div class="login-card">
+    <div class="login-intro">
+      <div class="mark">YL</div>
+      <h1>银犁物流城市冷链<br>仓配一体化协同平台</h1>
+      <p>选题案例 2 · 姜蒜与鲜面条城配协同调度</p>
+      <ul>
+        <li>客户与订单：坐标、两级时间窗、服务时间、批次归属</li>
+        <li>车辆与能源：10 辆冷藏车 · C3 新能源替换 · 谷段充电</li>
+        <li>路径与方案：Haversine 距离矩阵 · 趟次与发车时刻</li>
+        <li>评价与监控：S0-S3 多情景 · 预警闭环</li>
+      </ul>
+    </div>
+    <form class="login-form" id="loginForm" autocomplete="on">
+      <h2>登录</h2>
+      <div class="sub">请使用平台分配的账号登录</div>
+      <label for="username">用户名</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">口令</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit" id="submitBtn">登 录</button>
+      <div class="login-error" id="loginError"></div>
+      <div class="login-tip">
+        首次部署的默认账号为 <b>admin</b> / <b>admin123</b>，登录后会要求立即修改口令。<br>
+        忘记口令可由管理员在「用户与留痕」中重置。
+      </div>
+    </form>
+  </div>
+
+<script>
+const form = document.getElementById('loginForm');
+const errorBox = document.getElementById('loginError');
+const submitBtn = document.getElementById('submitBtn');
+
+function showError(message) {
+  errorBox.textContent = message;
+  errorBox.style.display = 'block';
+}
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  errorBox.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = '登录中…';
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showError(data.error || `登录失败（HTTP ${response.status}）`);
+      return;
+    }
+    const next = new URLSearchParams(location.search).get('next');
+    location.replace(next && next.startsWith('/') ? next : '/');
+  } catch (e) {
+    showError('网络异常：' + e.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '登 录';
+  }
+});
+
+// 已登录则直接进入驾驶舱
+fetch('/api/auth/me', { credentials: 'same-origin' }).then(r => {
+  if (r.ok) location.replace('/');
+}).catch(() => {});
+</script>
+</body>
+</html>

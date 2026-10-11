@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>监控反馈 · 银犁物流仓配一体化协同平台</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/admin.css">
+<style>
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+  .mapwrap{position:relative;background:linear-gradient(160deg,#f7fbff,#eaf4fb);border:1px solid #e3eef7;border-radius:14px;overflow:hidden}
+  canvas.map{display:block;width:100%;height:460px}
+  .status-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .status-card{border:1px solid #e3eef7;border-radius:12px;padding:10px 12px;background:#fff}
+  .status-card b{display:block;font-size:12px;color:#5b6b7c;font-weight:500}
+  .status-card strong{font-size:20px}
+  .s0{color:#0f7b6c}.s1{color:#c48a1f}.s2{color:#c46a1f}.s3{color:#c0392b}
+  .docks{display:flex;gap:6px;flex-wrap:wrap}
+  .dock-chip{border-radius:9px;padding:5px 9px;font-size:12px;border:1px solid #e3eef7;background:#f7fbff}
+  .dock-chip.busy{background:#e8f6f3;border-color:#bfe6df;color:#0f7b6c}
+  .dock-chip.queue{background:#fff6e6;border-color:#f0dcb0;color:#8a6d1f}
+  .tick{display:flex;align-items:center;gap:10px;min-width:320px}
+  input[type=range]{width:220px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/shell.js"></script>
+<script>
+(async () => {
+  const payload = await Shell.boot('/monitor.html', '执行监控与预警闭环',
+    '车辆位置 / 厢温 / 电量 / 月台占用模拟流 · 四类状态 · 三级预警与处置留痕');
+  if (!payload) return;
+
+  const mount = document.getElementById('pageMount');
+  const canHandle = Shell.has('monitor.handle');
+  const STATUS_COLOR = { '正常': '#0f7b6c', '临界': '#c48a1f', '异常': '#c46a1f', '严重异常': '#c0392b' };
+  const LEVEL_TAG = { 1: 'info', 2: 'warn', 3: 'bad' };
+  let state = { runId: null, tick: 480, timer: null, snap: null };
+
+  mount.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <div class="tick"><label>时刻</label>
+          <input type="range" id="tick" min="0" max="840" step="5" value="480">
+          <b id="tickText">08:00</b></div>
+        <button class="btn primary" id="btnPlay">▶ 播放</button>
+        <button class="btn" id="btnNow">刷新</button>
+        <span class="muted" id="runHint"></span>
+      </div>
+      <div class="status-row" id="statusRow"></div>
+    </div>
+
+    <div class="card"><div class="card-head"><h3>在途车辆与月台占用</h3>
+      <span class="muted">圆点＝车辆（按状态着色）· 方块＝配送中心 · 浅点＝客户 · 灰框＝月台</span></div>
+      <div class="mapwrap"><canvas id="map" class="map"></canvas>
+        <div class="maplegend" id="legend" style="position:absolute;left:12px;bottom:12px;background:rgba(255,255,255,.94);border:1px solid #e3eef7;border-radius:12px;padding:8px 11px;font-size:12px;line-height:1.9"></div>
+      </div>
+      <div style="margin-top:12px" class="docks" id="docks"></div>
+    </div>
+
+    <div class="card"><div class="card-head"><h3>车辆监控明细</h3><span class="muted" id="vehHint"></span></div><div id="vehicles"></div></div>
+
+    <div class="card"><div class="card-head"><h3>预警与处置</h3>
+      <span class="muted">${canHandle ? '点「处置」记录闭环（写入留痕）' : '当前角色只读'}</span></div>
+      <div id="alerts"></div></div>
+
+    <div class="card"><div class="card-head"><h3>处置留痕</h3></div><div id="events"></div></div>`;
+
+  const el = id => document.getElementById(id);
+  const clock = min => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+  function drawMap() {
+    const snap = state.snap;
+    const canvas = el('map');
+    const ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 900, h = 460;
+    canvas.width = w * ratio; canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#f9fcff'; ctx.fillRect(0, 0, w, h);
+    if (!snap || !snap.customers || !snap.customers.length) {
+      ctx.fillStyle = '#8595a8'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+      ctx.fillText('还没有方案：请先在「路径与方案」生成一次方案', 20, 32);
+      return;
+    }
+    const lons = snap.customers.map(c => c.lon).concat([snap.dc.lon]);
+    const lats = snap.customers.map(c => c.lat).concat([snap.dc.lat]);
+    const bounds = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+    const pad = 32;
+    const project = (lon, lat) => {
+      const spanLon = Math.max(1e-6, bounds[2] - bounds[0]), spanLat = Math.max(1e-6, bounds[3] - bounds[1]);
+      const k = Math.min((w - pad * 2) / spanLon, (h - pad * 2) / spanLat);
+      return [pad + (lon - bounds[0]) * k, h - pad - (lat - bounds[1]) * k];
+    };
+    ctx.strokeStyle = '#e7f0f7';
+    for (let i = 0; i <= 6; i++) {
+      const x = pad + (w - pad * 2) * i / 6, y = pad + (h - pad * 2) * i / 6;
+      ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke();
+    }
+    snap.customers.forEach(c => {
+      const [x, y] = project(c.lon, c.lat);
+      ctx.fillStyle = '#c9d8e6'; ctx.beginPath(); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#93a5b8'; ctx.font = '10px "Microsoft YaHei",sans-serif';
+      ctx.fillText(c.code, x + 5, y - 4);
+    });
+    const [dx, dy] = project(snap.dc.lon, snap.dc.lat);
+    ctx.fillStyle = '#102a43'; ctx.fillRect(dx - 7, dy - 7, 14, 14);
+    ctx.font = 'bold 12px "Microsoft YaHei",sans-serif'; ctx.fillText('配送中心 0', dx + 11, dy + 4);
+    (snap.vehicles || []).forEach(v => {
+      if (v.lon == null) return;
+      const [x, y] = project(v.lon, v.lat);
+      const color = STATUS_COLOR[v.status] || '#333';
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.fillStyle = '#102a43'; ctx.font = 'bold 10px "Microsoft YaHei",sans-serif';
+      ctx.fillText(v.vehicle_code, x + 9, y + 3);
+    });
+    const counts = snap.summary.status;
+    el('legend').innerHTML = Object.entries(STATUS_COLOR).map(([name, color]) =>
+      `<div><i style="display:inline-block;width:10px;height:10px;border-radius:5px;background:${color};margin-right:6px"></i>${name} ${counts[name] || 0} 辆</div>`).join('');
+  }
+
+  function renderStatus() {
+    const snap = state.snap;
+    if (!snap) { el('statusRow').innerHTML = ''; return; }
+    const s = snap.summary;
+    const cls = { '正常': 's0', '临界': 's1', '异常': 's2', '严重异常': 's3' };
+    el('statusRow').innerHTML = `
+      <div class="status-card"><b>四类状态</b>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+          ${Object.keys(STATUS_COLOR).map(name =>
+            `<span class="${cls[name]}"><strong>${s.status[name] || 0}</strong> <span style="font-size:12px">${name}</span></span>`).join('')}
+        </div></div>
+      <div class="status-card"><b>预警分级</b>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+          <span class="s1"><strong>${s.alerts['一级提示'] || 0}</strong> <span style="font-size:12px">一级</span></span>
+          <span class="s2"><strong>${s.alerts['二级警告'] || 0}</strong> <span style="font-size:12px">二级</span></span>
+          <span class="s3"><strong>${s.alerts['三级严重'] || 0}</strong> <span style="font-size:12px">三级</span></span>
+        </div></div>
+      <div class="status-card"><b>车辆阶段</b>
+        <div style="font-size:16px;margin-top:4px">在途 <b>${s.in_transit}</b> · 待发 <b>${s.waiting}</b> · 完成 <b>${s.finished}</b></div></div>
+      <div class="status-card"><b>月台占用</b>
+        <div style="font-size:16px;margin-top:4px">占用 <b>${s.docks_occupied}</b> / 空闲 <b>${s.docks_idle}</b> / 共 ${s.docks_total}</div></div>`;
+    el('tickText').textContent = clock(snap.tick);
+    el('runHint').textContent = `方案 #${snap.run_id} · ${snap.scenario} · ${snap.scope} · 车队 ${snap.fleet_tag || '-'}`;
+  }
+
+  function renderDocks() {
+    const snap = state.snap;
+    if (!snap) { el('docks').innerHTML = ''; return; }
+    const byDock = {};
+    (snap.docks || []).forEach(d => {
+      byDock[d.dock_code] = byDock[d.dock_code] || { busy: false, queue: 0 };
+      if (d.occupied) byDock[d.dock_code].busy = true;
+      byDock[d.dock_code].queue = Math.max(byDock[d.dock_code].queue, d.queue);
+    });
+    el('docks').innerHTML = Object.entries(byDock).map(([code, info]) =>
+      `<span class="dock-chip ${info.busy ? 'busy' : (info.queue ? 'queue' : '')}">${code}
+        ${info.busy ? '装车中' : (info.queue ? `排队 ${info.queue}` : '空闲')}</span>`).join('') ||
+      '<span class="muted">没有月台排班</span>';
+  }
+
+  function renderVehicles() {
+    const snap = state.snap;
+    if (!snap) { el('vehicles').innerHTML = ''; return; }
+    const columns = [
+      { title: '车辆', render: v => `<b>${v.vehicle_code}</b><div class="muted" style="font-size:11px">${v.energy_type}</div>` },
+      { title: '趟次', key: 'trip_id' },
+      { title: '月台', key: 'dock_code' },
+      { title: '阶段', render: v => `<span class="tag ${v.phase === '配送中' ? 'info' : 'grey'}">${v.phase}</span>` },
+      { title: '进度', render: v => `${v.progress}%<div class="muted" style="font-size:11px">${v.travelled_km}/${v.distance_km} km · 下一站 ${v.next_stop || '-'}</div>` },
+      { title: '厢温', render: v => `<span style="color:${v.temperature > v.temperature_limit ? '#c0392b' : 'inherit'}">${v.temperature}℃</span><div class="muted" style="font-size:11px">限值 ${v.temperature_limit}℃</div>` },
+      { title: '电量/油量', render: v => `${v.energy.value} ${v.energy.unit}` },
+      { title: '延误', render: v => v.delay_min ? `${v.delay_min} 分` : '—' },
+      { title: '状态', render: v => `<span class="tag ${v.status === '正常' ? 'ok' : (v.status === '临界' ? 'warn' : 'bad')}">${v.status}</span>` }
+    ];
+    el('vehicles').innerHTML = Shell.table(columns, snap.vehicles);
+    el('vehHint').textContent = `${snap.vehicles.length} 辆执行中 · ${clock(snap.tick)} 时刻快照`;
+  }
+
+  function renderAlerts() {
+    const snap = state.snap;
+    if (!snap) { el('alerts').innerHTML = ''; return; }
+    if (!snap.alerts.length) { el('alerts').innerHTML = '<div class="banner ok">✓ 当前时刻没有预警，全部车辆处于正常状态</div>'; return; }
+    el('alerts').innerHTML = snap.alerts
+      .sort((a, b) => b.level - a.level)
+      .map((a, i) => `<div class="banner ${LEVEL_TAG[a.level] === 'bad' ? 'bad' : 'info'}" data-alert="${i}">
+        <b>${a.level_text} · ${a.metric}</b>：${Shell.escapeHtml(a.detail)}
+        <div class="muted" style="margin:3px 0 6px">建议：${Shell.escapeHtml(a.suggestion)}　对象：${a.objects.join(', ')}</div>
+        ${canHandle ? `<button class="btn" data-ack="${i}" data-action="确认" style="padding:4px 10px;font-size:12px">确认</button>
+        <button class="btn primary" data-ack="${i}" data-action="处置" style="padding:4px 10px;font-size:12px">处置</button>
+        <button class="btn" data-ack="${i}" data-action="忽略" style="padding:4px 10px;font-size:12px">忽略</button>` : ''}
+      </div>`).join('');
+    el('alerts').querySelectorAll('[data-ack]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const alert = snap.alerts[Number(btn.dataset.ack)];
+        let note = '';
+        if (btn.dataset.action !== '忽略') {
+          note = prompt(`处置说明（${alert.metric}）：`, '已联系司机核实并记录') || '';
+          if (!note) return;
+        }
+        try {
+          const data = await Shell.api('/api/monitor/events', { method: 'POST', body: {
+            run_id: snap.run_id, level: alert.level, metric: alert.metric,
+            objects: alert.objects, action: btn.dataset.action, note: note } });
+          Shell.toast(`已记录：${btn.dataset.action}`, 'ok');
+          renderEvents(data.events);
+        } catch (e) { Shell.toast(e.message, 'err'); }
+      });
+    });
+  }
+
+  function renderEvents(events) {
+    const items = events || (state.snap ? state.snap.events : []) || [];
+    if (!items.length) { el('events').innerHTML = '<div class="empty">还没有处置记录</div>'; return; }
+    const columns = [
+      { title: '时间', key: 'created_at' },
+      { title: '级别', key: 'level_text' },
+      { title: '指标', key: 'metric' },
+      { title: '对象', key: 'object_codes' },
+      { title: '动作', render: e => `<span class="tag ${e.action === '处置' ? 'ok' : 'grey'}">${e.action}</span>` },
+      { title: '说明', key: 'note' },
+      { title: '处理人', key: 'created_by' }
+    ];
+    el('events').innerHTML = Shell.table(columns, items);
+  }
+
+  async function load() {
+    if (!state.runId) {
+      try {
+        const latest = await Shell.api('/api/plan/latest');
+        if (latest && latest.run_id) state.runId = latest.run_id;
+      } catch (e) { /* 无方案 */ }
+    }
+    const query = `/api/monitor/state?tick=${state.tick}` + (state.runId ? `&run_id=${state.runId}` : '');
+    try {
+      state.snap = await Shell.api(query);
+      state.runId = state.snap.run_id;
+      renderStatus(); renderDocks(); renderVehicles(); renderAlerts(); renderEvents(state.snap.events); drawMap();
+    } catch (e) { Shell.toast(e.message, 'err'); stop(); }
+  }
+
+  function play() {
+    if (state.timer) return;
+    el('btnPlay').textContent = '⏸ 暂停';
+    state.timer = setInterval(() => {
+      state.tick = state.tick >= 840 ? 0 : state.tick + 10;
+      el('tick').value = state.tick;
+      load();
+    }, 1200);
+  }
+  function stop() {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    el('btnPlay').textContent = '▶ 播放';
+  }
+
+  el('tick').addEventListener('input', event => { state.tick = Number(event.target.value); load(); });
+  el('btnPlay').addEventListener('click', () => state.timer ? stop() : play());
+  el('btnNow').addEventListener('click', load);
+  window.addEventListener('resize', drawMap);
+  await load();
+})();
+</script>
+</body>
+</html>

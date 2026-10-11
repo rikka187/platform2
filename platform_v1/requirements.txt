@@ -1,0 +1,14 @@
+# 平台运行依赖（Python 3.8 ~ 3.13 均可）
+#
+# OR-Tools（CP-SAT）是可选依赖：
+#   - 装上：页面可选“仅 CP-SAT”，平台使用约束规划求解“车-趟-月台-时间”方案；
+#   - 没装：平台仍可正常使用内置启发式求解器，功能不受影响。
+#
+# 版本说明：
+#   Ubuntu 20.04 自带 Python 3.8，9.7.2996 是兼容 3.8 的版本线；
+#   ortools 9.7 的 ortools/sat/python/cp_model.py 会 import pandas，
+#   但它自己的依赖元数据里没有声明 pandas（9.8+ 才声明），
+#   所以这里必须显式安装，否则 import cp_model 会报 No module named 'pandas'。
+ortools==9.7.2996; python_version < "3.9"
+pandas<2.1; python_version < "3.9"
+ortools>=9.8; python_version >= "3.9"
