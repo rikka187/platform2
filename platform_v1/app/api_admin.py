@@ -11,7 +11,7 @@ import json
 import sqlite3
 from typing import Optional
 
-from app import auth, db
+from app import auth, db, labels
 from app.config import Settings, get_settings
 from app.http import (
     Response, clear_session_cookie, parse_cookies, session_cookie, session_token, split_path,
@@ -372,12 +372,21 @@ def _validate_vehicle(payload: dict, partial: bool = False) -> dict:
 def list_vehicles(conn: sqlite3.Connection, query: dict) -> Response:
     fleet = (query.get('fleet') or [''])[0]
     items = db.list_vehicles(conn, fleet or None)
+    for item in items:                      # 中文标签：车队口径
+        item['fleet_label'] = labels.fleet_label(item.get('fleet_tag'))
     summary = {}
     for item in items:
         key = (item.get('fleet_tag') or 'baseline', item['vehicle_type'], item['energy_type'])
         summary.setdefault(str(key), 0)
         summary[str(key)] += 1
-    return Response(200, {'items': items, 'summary': {
+    fleets = []
+    seen = set()
+    for item in items:
+        tag = item.get('fleet_tag') or 'baseline'
+        if tag not in seen:
+            seen.add(tag)
+            fleets.append({'tag': tag, 'label': labels.fleet_label(tag)})
+    return Response(200, {'items': items, 'fleets': fleets, 'summary': {
         'total': len(items),
         'fuel': sum(1 for i in items if i['energy_type'] == '燃油'),
         'electric': sum(1 for i in items if i['energy_type'] == '纯电'),
@@ -437,8 +446,12 @@ def list_params(conn: sqlite3.Connection) -> Response:
     rows = [dict(r) for r in conn.execute('SELECT * FROM params ORDER BY category, key')]
     grouped = {}
     for row in rows:
-        grouped.setdefault(row.get('category') or '其他', []).append(row)
-    return Response(200, {'items': rows, 'grouped': grouped, 'count': len(rows)})
+        # 中文名称 / 单位 / 口径说明 / 分组（数据库仍存英文键名，展示一律走这里）
+        row.update(labels.param_label(row['key']))
+        row['group'] = labels.param_group(row['key'])
+        grouped.setdefault(row['group'], []).append(row)
+    groups = [{'title': title, 'items': items} for title, items in grouped.items()]
+    return Response(200, {'items': rows, 'grouped': grouped, 'groups': groups, 'count': len(rows)})
 
 
 def update_params(conn: sqlite3.Connection, payload: dict, user: dict) -> Response:
@@ -487,7 +500,13 @@ def list_audit(conn: sqlite3.Connection, query: dict) -> Response:
     limit = min(int((query.get('limit') or ['100'])[0] or 100), 500)
     rows = conn.execute(
         'SELECT * FROM audit_log ORDER BY id DESC LIMIT ?', (limit,))
-    return Response(200, {'items': [dict(r) for r in rows], 'limit': limit})
+    items = []
+    for row in rows:
+        item = dict(row)
+        item['action_label'] = labels.action_label(item.get('action'))     # 中文动作名
+        item['role_label'] = labels.role_label(item.get('role'))
+        items.append(item)
+    return Response(200, {'items': items, 'limit': limit})
 
 
 def geo_check(conn: sqlite3.Connection, query: dict) -> Response:

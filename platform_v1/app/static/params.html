@@ -40,7 +40,7 @@
   const el = id => document.getElementById(id);
 
   function render() {
-    el('groups').innerHTML = Object.keys(grouped).sort().map(category => `
+    el('groups').innerHTML = Object.keys(grouped).map(category => `
       <div class="card" style="box-shadow:none;border:1px solid #eef4f8;margin-bottom:14px">
         <div class="card-head" style="margin-bottom:10px">
           <h3 style="font-size:14px">${Shell.escapeHtml(category)}</h3>
@@ -49,9 +49,9 @@
         <div class="grid k3">
           ${grouped[category].map(item => `
             <div class="field">
-              <label>${Shell.escapeHtml(item.key)} · ${Shell.escapeHtml(item.unit || '')}</label>
+              <label>${Shell.escapeHtml(item.label || item.key)}${item.unit && item.unit !== '—' ? '（' + Shell.escapeHtml(item.unit) + '）' : ''}</label>
               <input data-key="${item.key}" value="${Shell.escapeHtml(item.value ?? '')}" ${canEdit ? '' : 'disabled'}>
-              <span class="muted" style="font-size:11px">来源：${Shell.escapeHtml(item.source || '-')}</span>
+              <span class="muted" style="font-size:11px">${Shell.escapeHtml(item.note || '')}${item.note ? '｜' : ''}键名 ${Shell.escapeHtml(item.key)}</span>
             </div>`).join('')}
         </div>
       </div>`).join('');

@@ -23,7 +23,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from app import db
+from app import db, labels
 from app.api_admin import ApiProblem, _current_user
 from app.auth import require
 from app.config import Settings, get_settings
@@ -235,10 +235,11 @@ def _run_scenario(conn: sqlite3.Connection, scenario: str, scope: str, fleet_tag
         'solver_scenario': solver_scenario,
         'scope': scope,
         'fleet_tag': fleet_tag,
-        'fleet_label': FLEET_LABELS.get(fleet_tag, fleet_tag),
+        'fleet_label': labels.fleet_label(fleet_tag),
         'profile': plan.get('profile'),
         'departure_policy': plan.get('departure_policy'),
         'solver': solution.get('solver'),
+        'solver_label': labels.solver_label(solution.get('solver')),
         'solver_status': solution.get('solver_status'),
         'kpi': kpi,
         'solver_kpi': solver_kpi,
@@ -335,6 +336,8 @@ def list_runs(conn: sqlite3.Connection, query: dict) -> Response:
         item['kpi'] = {k: kpi.get(k) for k in ('total_cost', 'on_time_rate', 'carbon_kg',
                                                'trips', 'used_vehicles', 'avg_load_rate')}
         item['scenario_label'] = SCENARIO_LABELS.get(item['scenario'], item['scenario'])
+        item['fleet_label'] = labels.fleet_label(item.get('fleet_tag'))
+        item['solver_label'] = labels.solver_label(item.get('solver'))
         items.append(item)
     return Response(200, {'items': items, 'scenarios': SCENARIO_LABELS})
 

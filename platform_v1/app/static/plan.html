@@ -245,7 +245,9 @@
       <div class="stat"><b>准时率</b><strong>${k.on_time_rate}%</strong><small>${k.on_time_customers}/${k.customers} 个客户</small></div>
       <div class="stat"><b>总里程 / 趟次</b><strong>${k.total_distance_km} km</strong><small>${k.trips} 趟次 · 用车 ${k.used_vehicles} 辆</small></div>
       <div class="stat"><b>碳排放</b><strong>${k.carbon_kg} kg</strong><small>装载率 ${k.avg_load_rate}% · 利用率 ${k.vehicle_utilization}%</small></div>`;
-    el('runHint').textContent = `求解器：${r.solver || '-'}${r.solver_status ? '（' + r.solver_status + '）' : ''} · 车队 ${r.fleet_tag}`;
+    el('runHint').textContent = `求解器：${r.solver_label || r.solver || '-'}`
+    + `${r.solver_status ? '（' + r.solver_status + '）' : ''} · 车队 ${r.fleet_label || r.fleet_tag}`
+    + `${r.profile ? ' · 算例口径 ' + (r.profile === 'paper' ? '论文基准构造' : '表2-3/2-4 真实窗口') : ''}`;
   }
 
   function renderCost() {

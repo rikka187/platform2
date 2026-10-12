@@ -1,0 +1,227 @@
+
+(async () => {
+  const payload = await Shell.boot('/scenarios.html', 'S0–S3 多情景评价',
+    '经济 / 时效 / 绿色 / 协同 / 效率 五维评分 + 边际效益（以 S0 人工调度为 60 分锚点）');
+  if (!payload) return;
+
+  const mount = document.getElementById('pageMount');
+  const canRun = Shell.has('scenarios.run');
+  const COLORS = { S0: '#8a94a6', S1: '#2367a8', S2: '#19a7a0', S3: '#c46a1f' };
+  let state = { scope: '姜蒜', solver: 'auto', data: null };
+
+  mount.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <div class="field" style="min-width:150px"><label>产品品类</label>
+          <select id="sScope"><option value="姜蒜">姜蒜（30 客户）</option>
+            <option value="鲜面条">鲜面条（30 客户）</option></select></div>
+        <div class="field" style="min-width:170px"><label>求解方式</label>
+          <select id="sSolver"><option value="auto" selected>自动（优先 CP-SAT）</option>
+            <option value="heuristic">仅启发式</option><option value="cpsat">仅 CP-SAT</option></select></div>
+        <button class="btn primary" id="btnEval" ${canRun ? '' : 'disabled'}>运行 S0→S3 评价</button>
+        <span class="muted" id="evalHint">四个情景依次求解（S0 人工基准 → S1 路径优化 → S2 +新能源 → S3 +月台协同）</span>
+      </div>
+      <div id="best" class="grid k4"></div>
+    </div>
+
+    <div class="card"><div class="card-head"><h3>五维评分对比</h3><span class="muted">越靠外越好；基准情景 S0 各维 = 60 分</span></div>
+      <div class="radar-wrap">
+        <div><canvas id="radar"></canvas></div>
+        <div><canvas id="scoreBar"></canvas></div>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="card"><div class="card-head"><h3>指标矩阵</h3><span class="muted" id="matrixHint"></span></div><div id="matrix"></div></div>
+
+    <div class="grid k2">
+      <div class="card"><div class="card-head"><h3>边际效益（相对上一情景）</h3></div><div id="delta"></div></div>
+      <div class="card"><div class="card-head"><h3>相对基准 S0 的改善</h3></div><div id="baseline"></div></div>
+    </div>`;
+
+  const el = id => document.getElementById(id);
+
+  function drawRadar() {
+    const data = state.data;
+    const canvas = el('radar');
+    const ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 460, h = 360;
+    canvas.width = w * ratio; canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!data) {
+      ctx.fillStyle = '#8595a8'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+      ctx.fillText('点「运行 S0→S3 评价」后显示雷达图', 20, 30);
+      return;
+    }
+    const dims = data.evaluation.dimensions;
+    const cx = w / 2, cy = h / 2 + 4, radius = Math.min(w, h) / 2 - 46;
+    const angle = i => -Math.PI / 2 + i * 2 * Math.PI / dims.length;
+
+    ctx.strokeStyle = '#e6eff7'; ctx.fillStyle = '#fbfdff';
+    [0.25, 0.5, 0.75, 1].forEach(k => {
+      ctx.beginPath();
+      dims.forEach((_, i) => {
+        const r = radius * k, x = cx + r * Math.cos(angle(i)), y = cy + r * Math.sin(angle(i));
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+    ctx.strokeStyle = '#dfeaf4';
+    dims.forEach((_, i) => {
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radius * Math.cos(angle(i)), cy + radius * Math.sin(angle(i))); ctx.stroke();
+    });
+    dims.forEach((name, i) => {
+      ctx.fillStyle = '#5b6b7c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+      const x = cx + (radius + 20) * Math.cos(angle(i)), y = cy + (radius + 20) * Math.sin(angle(i));
+      ctx.textAlign = Math.abs(Math.cos(angle(i))) < 0.3 ? 'center' : (Math.cos(angle(i)) > 0 ? 'left' : 'right');
+      ctx.fillText(name, x, y + 4);
+    });
+    data.evaluation.items.forEach(row => {
+      ctx.strokeStyle = COLORS[row.scenario] || '#333'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      dims.forEach((name, i) => {
+        const value = Math.max(0, Math.min(100, row.scores[name] || 0)) / 100;
+        const r = radius * value;
+        const x = cx + r * Math.cos(angle(i)), y = cy + r * Math.sin(angle(i));
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = (COLORS[row.scenario] || '#333') + '22'; ctx.fill();
+    });
+  }
+
+  function drawScoreBar() {
+    const data = state.data;
+    const canvas = el('scoreBar');
+    const ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 460, h = 360;
+    canvas.width = w * ratio; canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!data) return;
+    const items = data.evaluation.items;
+    const padL = 60, padB = 26, padT = 16;
+    const barW = Math.max(18, (w - padL - 20) / items.length - 18);
+    // 总分柱
+    const maxScore = Math.max(100, ...items.map(i => i.total_score));
+    items.forEach((row, index) => {
+      const x = padL + index * ((w - padL - 20) / items.length) + 9;
+      const barH = (h - padT - padB) * row.total_score / maxScore;
+      ctx.fillStyle = COLORS[row.scenario] || '#333';
+      ctx.fillRect(x, h - padB - barH, barW, barH);
+      ctx.fillStyle = '#102a43'; ctx.font = 'bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(row.total_score, x + barW / 2, h - padB - barH - 6);
+      ctx.fillStyle = '#5b6b7c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+      ctx.fillText(row.scenario, x + barW / 2, h - padB + 16);
+    });
+    // 五维折线（同一坐标系按比例）
+    const dims = data.evaluation.dimensions;
+    const dimColors = ['#2367a8', '#19a7a0', '#c46a1f', '#7b4fb5', '#2f6f4f'];
+    dims.forEach((name, di) => {
+      ctx.strokeStyle = dimColors[di]; ctx.lineWidth = 1.6; ctx.beginPath();
+      items.forEach((row, index) => {
+        const x = padL + index * ((w - padL - 20) / items.length) + 9 + barW / 2;
+        const y = h - padB - (h - padT - padB) * (row.scores[name] || 0) / maxScore;
+        index ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    });
+    ctx.textAlign = 'left'; ctx.fillStyle = '#8595a8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+    ctx.fillText('柱＝总分　折线＝五维', padL - 52, h - padB + 16);
+  }
+
+  function renderBest() {
+    const data = state.data;
+    if (!data) { el('best').innerHTML = '<div class="empty">尚未运行评价</div>'; return; }
+    const items = data.evaluation.items;
+    const best = items.find(i => i.scenario === data.evaluation.best) || items[0];
+    el('best').innerHTML = `
+      <div class="stat"><b>最优情景</b><strong>${best.scenario} · ${best.total_score} 分</strong>
+        <small>${best.label}</small></div>
+      <div class="stat"><b>排名</b><strong>${data.evaluation.ranking.join(' > ')}</strong>
+        <small>按五维加权总分</small></div>
+      <div class="stat"><b>相对基准节省</b><strong>${best.vs_baseline.cost_saving} 元</strong>
+        <small>${(best.vs_baseline.cost_saving / (items[0].metrics.total_cost || 1) * 100).toFixed(1)}% 成本下降</small></div>
+      <div class="stat"><b>碳减排</b><strong>${best.vs_baseline.carbon_saving} kg</strong>
+        <small>准时率 ${best.metrics.on_time_rate}%</small></div>`;
+    el('evalHint').textContent = `${data.scope} · 求解器 ${data.solver} · S0 为 60 分锚点`;
+  }
+
+  function renderMatrix() {
+    const data = state.data;
+    if (!data) { el('matrix').innerHTML = ''; return; }
+    const dims = data.evaluation.dimensions;
+    const columns = [
+      { title: '情景', render: r => `<b>${r.scenario}</b><div class="muted" style="font-size:11px">${r.label}</div>` },
+      { title: '总分', render: r => `<span class="score-pill" style="color:${COLORS[r.scenario]}">${r.total_score}</span>` },
+      ...dims.map(name => ({ title: name, render: r => r.scores[name] })),
+      { title: '总成本(元)', render: r => r.metrics.total_cost },
+      { title: '准时率', render: r => r.metrics.on_time_rate + '%' },
+      { title: '碳排(kg)', render: r => r.metrics.carbon_kg },
+      { title: '里程(km)', render: r => r.metrics.total_distance_km },
+      { title: '装载率', render: r => r.metrics.avg_load_rate + '%' },
+      { title: '月台冲突', render: r => r.metrics.dock_conflicts }
+    ];
+    el('matrix').innerHTML = Shell.table(columns, data.evaluation.items);
+    el('matrixHint').textContent = '口径：选题表2-5/2-6 成本 + Haversine 里程；S0 含 1.22 人工调度绕行系数';
+  }
+
+  function renderDelta() {
+    const data = state.data;
+    if (!data) { el('delta').innerHTML = ''; return; }
+    const rows = data.evaluation.items.filter(r => r.scenario !== data.evaluation.items[0].scenario)
+      .map(r => ({
+        scenario: r.scenario, label: r.label,
+        cost: r.delta.cost, carbon: r.delta.carbon, on_time: r.delta.on_time,
+        distance: r.delta.distance, score: r.delta.score
+      }));
+    const columns = [
+      { title: '情景', render: r => `<b>${r.scenario}</b>` },
+      { title: '成本变化', render: r => `<span class="tag ${r.cost <= 0 ? 'ok' : 'bad'}">${r.cost <= 0 ? '↓' : '↑'} ${Math.abs(r.cost)} 元</span>` },
+      { title: '碳排变化', render: r => `<span class="tag ${r.carbon <= 0 ? 'ok' : 'bad'}">${r.carbon <= 0 ? '↓' : '↑'} ${Math.abs(r.carbon)} kg</span>` },
+      { title: '准时率变化', render: r => `${r.on_time >= 0 ? '+' : ''}${r.on_time} pt` },
+      { title: '里程变化', render: r => `${r.distance >= 0 ? '+' : ''}${r.distance} km` },
+      { title: '总分变化', render: r => `<span class="tag ${r.score >= 0 ? 'ok' : 'bad'}">${r.score >= 0 ? '+' : ''}${r.score}</span>` }
+    ];
+    el('delta').innerHTML = Shell.table(columns, rows);
+  }
+
+  function renderBaseline() {
+    const data = state.data;
+    if (!data) { el('baseline').innerHTML = ''; return; }
+    const base = data.evaluation.items[0];
+    el('baseline').innerHTML = data.evaluation.items.map(row => {
+      const pct = base.metrics.total_cost ? (row.vs_baseline.cost_saving / base.metrics.total_cost * 100) : 0;
+      const width = Math.max(0, Math.min(100, Math.abs(pct) * 3));
+      return `<div class="bar-row" style="grid-template-columns:70px 1fr 190px">
+        <span><b>${row.scenario}</b></span>
+        <div class="bar-track"><div class="bar-fill" style="width:${width}%;background:${COLORS[row.scenario]}"></div></div>
+        <span style="text-align:right">省 ${row.vs_baseline.cost_saving} 元（${pct.toFixed(1)}%）· 碳 ${row.vs_baseline.carbon_saving} kg</span>
+      </div>`;
+    }).join('');
+  }
+
+  function renderAll() { renderBest(); renderMatrix(); renderDelta(); renderBaseline(); drawRadar(); drawScoreBar();
+    el('legend').innerHTML = Object.entries(COLORS).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join(''); }
+
+  async function evaluate() {
+    if (!canRun) { Shell.toast('当前角色没有运行情景评价的权限', 'err'); return; }
+    el('btnEval').disabled = true; el('btnEval').textContent = '计算中…（四个情景）';
+    try {
+      state.data = await Shell.api('/api/plan/compare', { method: 'POST',
+        body: { scope: el('sScope').value, solver: el('sSolver').value } });
+      renderAll();
+      Shell.toast(`评价完成：最优 ${state.data.evaluation.best}`, 'ok');
+    } catch (e) { Shell.toast(e.message, 'err'); }
+    finally { el('btnEval').disabled = false; el('btnEval').textContent = '运行 S0→S3 评价'; }
+  }
+
+  el('btnEval').addEventListener('click', evaluate);
+  el('sScope').addEventListener('change', () => { state.data = null; renderAll(); });
+  window.addEventListener('resize', () => { drawRadar(); drawScoreBar(); });
+  renderAll();
+})();

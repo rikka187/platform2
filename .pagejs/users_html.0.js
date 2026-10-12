@@ -1,0 +1,157 @@
+
+(async () => {
+  const payload = await Shell.boot('/users.html', '用户与操作留痕',
+    '按角色分配读写权限，关键操作全部留痕（论文 4.3.5 权限控制）');
+  if (!payload) return;
+
+  const mount = document.getElementById('pageMount');
+  let users = [], roles = {}, audit = [];
+
+  mount.innerHTML = `
+    <div class="grid k3" id="stats"></div>
+    <div class="card">
+      <div class="card-head">
+        <h3>平台用户</h3>
+        <button class="btn primary" id="btnNewUser">+ 新建用户</button>
+      </div>
+      <div id="usersTable"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>操作留痕</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="auditLimit" class="btn ghost">
+            <option value="50">最近 50 条</option>
+            <option value="100" selected>最近 100 条</option>
+            <option value="300">最近 300 条</option>
+          </select>
+          <button class="btn ghost" id="btnRefresh">刷新</button>
+        </div>
+      </div>
+      <div id="auditTable"></div>
+    </div>`;
+
+  const el = id => document.getElementById(id);
+  const ACTION_LABELS = {
+    'login.ok': '登录成功', 'login.fail': '登录失败', 'logout': '退出登录',
+    'user.bootstrap': '初始化管理员', 'user.create': '新建用户', 'user.role': '调整角色',
+    'user.active': '启用/停用', 'user.password': '重置口令',
+    'customer.create': '新增客户', 'customer.update': '修改客户', 'customer.delete': '删除客户',
+    'customer.import': '导入客户', 'vehicle.create': '新增车辆', 'vehicle.update': '修改车辆',
+    'vehicle.delete': '删除车辆', 'params.update': '修改参数'
+  };
+
+  function renderStats() {
+    const admins = users.filter(u => u.role === 'admin').length;
+    const actives = users.filter(u => u.active).length;
+    el('stats').innerHTML = `
+      <div class="stat"><b>账号总数</b><strong>${users.length}</strong><small>启用 ${actives}</small></div>
+      <div class="stat"><b>管理员</b><strong>${admins}</strong><small>拥有全部权限</small></div>
+      <div class="stat"><b>留痕条数</b><strong>${audit.length}</strong><small>当前展示范围</small></div>`;
+  }
+
+  function renderUsers() {
+    const columns = [
+      { title: '用户名', render: r => `<b>${Shell.escapeHtml(r.username)}</b>` },
+      { title: '姓名', render: r => Shell.escapeHtml(r.display_name || '') },
+      { title: '角色', render: r => `<span class="tag info">${roles[r.role] || r.role}</span>` },
+      { title: '状态', render: r => r.active ? '<span class="tag ok">启用</span>' : '<span class="tag bad">停用</span>' },
+      { title: '口令状态', render: r => r.must_change_password ? '<span class="tag warn">待改初始口令</span>' : '<span class="tag grey">正常</span>' },
+      { title: '创建时间', key: 'created_at' },
+      { title: '最近登录', render: r => r.last_login_at || '<span class="muted">从未登录</span>' },
+      { title: '操作', render: r => `
+        <select data-role="${r.id}" class="btn ghost sm" style="padding:4px 6px">
+          ${Object.keys(roles).map(key => `<option value="${key}" ${key === r.role ? 'selected' : ''}>${roles[key]}</option>`).join('')}
+        </select>
+        <button class="btn sm" data-reset="${r.id}">重置口令</button>
+        <button class="btn sm ${r.active ? 'danger' : ''}" data-toggle="${r.id}">${r.active ? '停用' : '启用'}</button>` }
+    ];
+    el('usersTable').innerHTML = Shell.table(columns, users);
+    el('usersTable').querySelectorAll('[data-role]').forEach(select => select.addEventListener('change', async event => {
+      try {
+        await Shell.api('/api/users/' + select.dataset.role, { method: 'PATCH', body: { role: event.target.value } });
+        Shell.toast('角色已更新', 'ok'); await load();
+      } catch (e) { Shell.toast(e.message, 'err'); await load(); }
+    }));
+    el('usersTable').querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', async () => {
+      const id = btn.dataset.reset;
+      const target = users.find(u => String(u.id) === String(id));
+      const pwd = prompt(`为 ${target.username} 设置新口令（至少 8 位，含字母与数字）：`);
+      if (!pwd) return;
+      try {
+        await Shell.api('/api/users/' + id, { method: 'PATCH', body: { password: pwd } });
+        Shell.toast('口令已重置，该用户下次登录需改口令', 'ok');
+        await load();
+      } catch (e) { Shell.toast(e.message, 'err'); }
+    }));
+    el('usersTable').querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', async () => {
+      const id = btn.dataset.toggle;
+      const target = users.find(u => String(u.id) === String(id));
+      try {
+        await Shell.api('/api/users/' + id, { method: 'PATCH', body: { active: target.active ? 0 : 1 } });
+        Shell.toast(target.active ? '账号已停用' : '账号已启用', 'ok'); await load();
+      } catch (e) { Shell.toast(e.message, 'err'); }
+    }));
+  }
+
+  function renderAudit() {
+    const columns = [
+      { title: '时间', key: 'ts' },
+      { title: '用户', render: r => `${Shell.escapeHtml(r.username || '-')}${r.role ? `（${roles[r.role] || r.role}）` : ''}` },
+      { title: '动作', render: r => `<span class="tag grey">${r.action_label || ACTION_LABELS[r.action] || r.action}</span>` },
+      { title: '对象', render: r => `${Shell.escapeHtml(r.object_type || '')} ${Shell.escapeHtml(r.object_id || '')}` },
+      { title: '说明', render: r => Shell.escapeHtml(r.detail || '') },
+      { title: '来源 IP', render: r => Shell.escapeHtml(r.ip || '') }
+    ];
+    el('auditTable').innerHTML = Shell.table(columns, audit);
+  }
+
+  async function load() {
+    const userData = await Shell.api('/api/users');
+    users = userData.items; roles = userData.roles || {};
+    const auditData = await Shell.api('/api/audit?limit=' + el('auditLimit').value);
+    audit = auditData.items;
+    renderStats(); renderUsers(); renderAudit();
+  }
+
+  function newUserDialog() {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask open';
+    mask.innerHTML = `
+      <div class="modal" style="width:min(460px,100%)">
+        <h3>新建用户</h3>
+        <div class="muted">新用户首次登录会被要求修改初始口令</div>
+        <div class="modal-body grid" style="gap:12px">
+          <div class="field"><label>用户名</label><input id="uName"></div>
+          <div class="field"><label>姓名</label><input id="uDisplay"></div>
+          <div class="field"><label>角色</label><select id="uRole">
+            ${Object.keys(roles).map(key => `<option value="${key}">${roles[key]}</option>`).join('')}
+          </select></div>
+          <div class="field"><label>初始口令（至少 8 位，含字母与数字）</label><input id="uPwd" type="text" value="abc12345"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" data-close>取消</button>
+          <button class="btn primary" id="uSave">创建</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+    mask.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => mask.remove()));
+    mask.querySelector('#uSave').addEventListener('click', async () => {
+      try {
+        await Shell.api('/api/users', { method: 'POST', body: {
+          username: mask.querySelector('#uName').value.trim(),
+          display_name: mask.querySelector('#uDisplay').value.trim(),
+          role: mask.querySelector('#uRole').value,
+          password: mask.querySelector('#uPwd').value
+        }});
+        Shell.toast('用户已创建', 'ok');
+        mask.remove(); await load();
+      } catch (e) { Shell.toast(e.message, 'err'); }
+    });
+  }
+
+  el('btnNewUser').addEventListener('click', newUserDialog);
+  el('btnRefresh').addEventListener('click', load);
+  el('auditLimit').addEventListener('change', load);
+  await load();
+})();

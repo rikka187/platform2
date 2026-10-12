@@ -111,7 +111,7 @@
     const columns = [
       { title: '时间', key: 'ts' },
       { title: '用户', render: r => `${Shell.escapeHtml(r.username || '-')}${r.role ? `（${roles[r.role] || r.role}）` : ''}` },
-      { title: '动作', render: r => `<span class="tag grey">${ACTION_LABELS[r.action] || r.action}</span>` },
+      { title: '动作', render: r => `<span class="tag grey">${r.action_label || ACTION_LABELS[r.action] || r.action}</span>` },
       { title: '对象', render: r => `${Shell.escapeHtml(r.object_type || '')} ${Shell.escapeHtml(r.object_id || '')}` },
       { title: '说明', render: r => Shell.escapeHtml(r.detail || '') },
       { title: '来源 IP', render: r => Shell.escapeHtml(r.ip || '') }

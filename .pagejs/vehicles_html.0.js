@@ -1,0 +1,161 @@
+
+(async () => {
+  const payload = await Shell.boot('/vehicles.html', '车辆与运力管理',
+    '选题案例2 表2-5 / 表2-6：车型、载重、容积、成本、能耗；可增删车辆并自定义参数');
+  if (!payload) return;
+
+  const mount = document.getElementById('pageMount');
+  let state = { fleet: 'baseline', items: [], summary: {} };
+  const canEdit = Shell.has('vehicles.edit');
+
+  mount.innerHTML = `
+    <div class="grid k4" id="stats"></div>
+    <div class="card">
+      <div class="card-head">
+        <h3>车队构成</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" data-fleet="baseline" id="tabBaseline">现状车队（10 辆燃油）</button>
+          <button class="btn" data-fleet="c3" id="tabC3">C3 新能源方案（6 电 + 2 油）</button>
+          <button class="btn primary" id="btnNew" ${canEdit ? '' : 'disabled'}>+ 新增车辆</button>
+        </div>
+      </div>
+      <div class="muted" id="fleetNote"></div>
+      <div id="table" style="margin-top:12px"></div>
+    </div>`;
+
+  const el = id => document.getElementById(id);
+
+  function renderStats() {
+    const s = state.summary || {};
+    el('stats').innerHTML = `
+      <div class="stat"><b>当前车队车辆</b><strong>${s.total ?? 0}</strong><small>${state.fleet === 'c3' ? 'C3 新能源替换方案' : '现状车队'}</small></div>
+      <div class="stat"><b>燃油车</b><strong>${s.fuel ?? 0}</strong><small>柴油 6.5 元/L</small></div>
+      <div class="stat"><b>纯电车</b><strong>${s.electric ?? 0}</strong><small>谷段电价 0.256 元/kWh</small></div>
+      <div class="stat"><b>小型 / 中型</b><strong>${s.small ?? 0} / ${s.medium ?? 0}</strong><small>1500kg·15m³ / 7000kg·38m³</small></div>`;
+    el('fleetNote').textContent = state.fleet === 'c3'
+      ? 'C3 口径：6 辆纯电（5 小型 + 1 中型）+ 2 辆保留燃油（中型 M1、小型 S4）；有效续航已计入冬季衰减 25% 与冷机折损 10%。'
+      : '现状口径：8 辆 4.2 米小型冷藏车 + 2 辆 7.6 米中型冷藏车（选题表2-5）。';
+    el('tabBaseline').className = 'btn' + (state.fleet === 'baseline' ? ' primary' : '');
+    el('tabC3').className = 'btn' + (state.fleet === 'c3' ? ' primary' : '');
+  }
+
+  function renderTable() {
+    const columns = [
+      { title: '车号', render: r => `<b>${r.code}</b>` },
+      { title: '车队口径', render: r => `<span class="tag info">${r.fleet_label || r.fleet_tag}</span>` },
+      { title: '名称', render: r => Shell.escapeHtml(r.name || '') },
+      { title: '车型', render: r => `<span class="tag grey">${r.vehicle_type}</span>` },
+      { title: '能源', render: r => `<span class="tag ${r.energy_type === '纯电' ? 'ok' : 'warn'}">${r.energy_type}</span>` },
+      { title: '载重(kg)', key: 'capacity_kg' },
+      { title: '容积(m³)', key: 'capacity_m3' },
+      { title: '固定成本', render: r => `${r.fixed_cost} 元/趟` },
+      { title: '单位成本', render: r => `${r.unit_cost} 元/km` },
+      { title: '维护', render: r => `${r.maintenance_cost} 元/日` },
+      { title: '标称续航', render: r => `${r.range_km} km` },
+      { title: '有效续航', render: r => `<b>${r.effective_range_km} km</b>` },
+      { title: '行驶能耗', render: r => r.energy_consumption || '' },
+      { title: '冷机能耗', render: r => r.reefer_consumption || '' },
+      { title: '购置价', render: r => `${r.purchase_price_wan} 万` },
+      { title: '状态', render: r => r.available ? '<span class="tag ok">可用</span>' : '<span class="tag bad">停用</span>' },
+      { title: '操作', render: r => canEdit
+        ? `<button class="btn sm" data-edit="${r.id}">编辑</button>
+           <button class="btn sm danger" data-del="${r.id}">删除</button>` : '<span class="muted">只读</span>' }
+    ];
+    el('table').innerHTML = Shell.table(columns, state.items);
+    el('table').querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => editor(Number(b.dataset.edit))));
+    el('table').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => remove(Number(b.dataset.del))));
+  }
+
+  async function load() {
+    const data = await Shell.api('/api/vehicles?fleet=' + encodeURIComponent(state.fleet));
+    state.items = data.items; state.summary = data.summary;
+    renderStats(); renderTable();
+  }
+
+  function editor(id) {
+    const isNew = !id;
+    const row = isNew ? {
+      fleet_tag: state.fleet, vehicle_type: '小型', energy_type: '燃油', capacity_kg: 1500,
+      capacity_m3: 15, box_size: '4.05*2.10*2.10', fixed_cost: 200, unit_cost: 2.5,
+      maintenance_cost: 40, range_km: 600, effective_range_km: 600,
+      energy_consumption: '0.118 L/km', reefer_consumption: '0.4 L/h', purchase_price_wan: 12, available: 1
+    } : state.items.find(r => r.id === id);
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask open';
+    const field = (key, label, type = 'number', step = '0.1') =>
+      `<div class="field"><label>${label}</label><input id="v_${key}" type="${type}" step="${step}" value="${row[key] ?? ''}"></div>`;
+    mask.innerHTML = `
+      <div class="modal" style="width:min(760px,100%)">
+        <h3>${isNew ? '新增车辆' : '编辑车辆 ' + row.code}</h3>
+        <div class="muted">有效续航用于新能源可行路线判定；纯电车请按 135/189 km 口径填写。</div>
+        <div class="modal-body"><div class="form-grid">
+          ${field('code', '车号 *', 'text')}
+          ${field('name', '名称', 'text')}
+          <div class="field"><label>车队</label><select id="v_fleet_tag">
+            <option value="baseline" ${row.fleet_tag === 'baseline' ? 'selected' : ''}>现状车队</option>
+            <option value="c3" ${row.fleet_tag === 'c3' ? 'selected' : ''}>C3 新能源</option></select></div>
+          <div class="field"><label>车型 *</label><select id="v_vehicle_type">
+            <option value="小型" ${row.vehicle_type === '小型' ? 'selected' : ''}>小型（4.2m）</option>
+            <option value="中型" ${row.vehicle_type === '中型' ? 'selected' : ''}>中型（7.6m）</option></select></div>
+          <div class="field"><label>能源类型 *</label><select id="v_energy_type">
+            <option value="燃油" ${row.energy_type === '燃油' ? 'selected' : ''}>燃油</option>
+            <option value="纯电" ${row.energy_type === '纯电' ? 'selected' : ''}>纯电</option></select></div>
+          ${field('capacity_kg', '额定载重(kg)')}
+          ${field('capacity_m3', '货厢容积(m³)')}
+          ${field('box_size', '车厢内尺寸', 'text')}
+          ${field('fixed_cost', '固定成本(元/趟)')}
+          ${field('unit_cost', '单位运输成本(元/km)')}
+          ${field('maintenance_cost', '日维护成本(元)')}
+          ${field('range_km', '标称续航(km)')}
+          ${field('effective_range_km', '有效续航(km)')}
+          ${field('energy_consumption', '行驶能耗', 'text')}
+          ${field('reefer_consumption', '冷机能耗', 'text')}
+          ${field('purchase_price_wan', '购置价(万元)')}
+          <div class="field"><label>可用状态</label><select id="v_available">
+            <option value="1" ${row.available ? 'selected' : ''}>可用</option>
+            <option value="0" ${row.available ? '' : 'selected'}>停用</option></select></div>
+          <div class="field span4"><label>备注</label><input id="v_note" value="${Shell.escapeHtml(row.note || '')}"></div>
+        </div></div>
+        <div class="modal-foot">
+          <button class="btn ghost" data-close>取消</button>
+          <button class="btn primary" id="vSave">保存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+    mask.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => mask.remove()));
+    mask.querySelector('#vSave').addEventListener('click', async () => {
+      const value = key => mask.querySelector('#v_' + key).value;
+      const body = {
+        code: value('code').trim(), name: value('name').trim(),
+        fleet_tag: value('fleet_tag'), vehicle_type: value('vehicle_type'), energy_type: value('energy_type'),
+        capacity_kg: value('capacity_kg'), capacity_m3: value('capacity_m3'), box_size: value('box_size'),
+        fixed_cost: value('fixed_cost'), unit_cost: value('unit_cost'), maintenance_cost: value('maintenance_cost'),
+        range_km: value('range_km'), effective_range_km: value('effective_range_km'),
+        energy_consumption: value('energy_consumption'), reefer_consumption: value('reefer_consumption'),
+        purchase_price_wan: value('purchase_price_wan'), available: value('available'), note: value('note')
+      };
+      try {
+        if (isNew) await Shell.api('/api/vehicles', { method: 'POST', body });
+        else await Shell.api('/api/vehicles/' + id, { method: 'PATCH', body });
+        Shell.toast(isNew ? '车辆已新增' : '车辆已更新', 'ok');
+        mask.remove();
+        await load();
+      } catch (e) { Shell.toast(e.message, 'err'); }
+    });
+  }
+
+  async function remove(id) {
+    const row = state.items.find(r => r.id === id);
+    if (!confirm(`确认删除车辆 ${row.code}（${row.vehicle_type}·${row.energy_type}）？`)) return;
+    try {
+      await Shell.api('/api/vehicles/' + id, { method: 'DELETE' });
+      Shell.toast('车辆已删除', 'ok');
+      await load();
+    } catch (e) { Shell.toast(e.message, 'err'); }
+  }
+
+  el('tabBaseline').addEventListener('click', () => { state.fleet = 'baseline'; load(); });
+  el('tabC3').addEventListener('click', () => { state.fleet = 'c3'; load(); });
+  el('btnNew').addEventListener('click', () => editor(null));
+  await load();
+})();

@@ -1,0 +1,83 @@
+
+(async () => {
+  const payload = await Shell.boot('/params.html', '参数设置',
+    '选题表2-5 / 表2-6 与第三章能源碳排参数；修改即写入留痕日志');
+  if (!payload) return;
+
+  const mount = document.getElementById('pageMount');
+  const canEdit = Shell.has('vehicles.edit');
+  let grouped = {};
+  const dirty = new Map();
+
+  mount.innerHTML = `
+    <div class="banner info">距离与时间口径：Haversine 公式、地球半径 <b>6371.0 km</b>、距离保留 <b>2 位小数</b>；
+      行驶时间 = 距离 ÷ 平均车速 × 60。<span id="geoState"></span></div>
+    <div class="card">
+      <div class="card-head">
+        <h3>运行参数</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="muted" id="dirtyHint">未修改</span>
+          <button class="btn ghost" id="btnReload">放弃修改</button>
+          <button class="btn primary" id="btnSave" ${canEdit ? '' : 'disabled'}>保存修改</button>
+        </div>
+      </div>
+      <div id="groups"></div>
+    </div>`;
+
+  const el = id => document.getElementById(id);
+
+  function render() {
+    el('groups').innerHTML = Object.keys(grouped).map(category => `
+      <div class="card" style="box-shadow:none;border:1px solid #eef4f8;margin-bottom:14px">
+        <div class="card-head" style="margin-bottom:10px">
+          <h3 style="font-size:14px">${Shell.escapeHtml(category)}</h3>
+          <span class="muted">${grouped[category].length} 项</span>
+        </div>
+        <div class="grid k3">
+          ${grouped[category].map(item => `
+            <div class="field">
+              <label>${Shell.escapeHtml(item.label || item.key)}${item.unit && item.unit !== '—' ? '（' + Shell.escapeHtml(item.unit) + '）' : ''}</label>
+              <input data-key="${item.key}" value="${Shell.escapeHtml(item.value ?? '')}" ${canEdit ? '' : 'disabled'}>
+              <span class="muted" style="font-size:11px">${Shell.escapeHtml(item.note || '')}${item.note ? '｜' : ''}键名 ${Shell.escapeHtml(item.key)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+    el('groups').querySelectorAll('input[data-key]').forEach(input => {
+      input.addEventListener('input', () => {
+        dirty.set(input.dataset.key, input.value);
+        el('dirtyHint').textContent = `已修改 ${dirty.size} 项（未保存）`;
+      });
+    });
+  }
+
+  async function load() {
+    const data = await Shell.api('/api/params');
+    grouped = data.grouped || {};
+    dirty.clear();
+    el('dirtyHint').textContent = '未修改';
+    render();
+    try {
+      const geo = await Shell.api('/api/geo/check');
+      el('geoState').innerHTML = geo.consistent
+        ? '<span class="tag ok" style="margin-left:6px">距离矩阵与既有矩阵一致</span>'
+        : '<span class="tag bad" style="margin-left:6px">距离矩阵不一致</span>';
+    } catch (e) { /* 忽略 */ }
+  }
+
+  el('btnSave').addEventListener('click', async () => {
+    if (!dirty.size) { Shell.toast('没有需要保存的修改', ''); return; }
+    const original = {};
+    Object.keys(grouped).forEach(cat => grouped[cat].forEach(item => { original[item.key] = item.value; }));
+    const updates = {};
+    dirty.forEach((value, key) => { if (String(original[key] ?? '') !== String(value)) updates[key] = value; });
+    if (!Object.keys(updates).length) { Shell.toast('修改内容与原值相同', ''); return; }
+    try {
+      await Shell.api('/api/params', { method: 'PATCH', body: { updates } });
+      Shell.toast(`已保存 ${Object.keys(updates).length} 项参数`, 'ok');
+      await load();
+    } catch (e) { Shell.toast(e.message, 'err'); }
+  });
+  el('btnReload').addEventListener('click', load);
+
+  await load();
+})();

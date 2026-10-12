@@ -55,6 +55,7 @@
   function renderTable() {
     const columns = [
       { title: '车号', render: r => `<b>${r.code}</b>` },
+      { title: '车队口径', render: r => `<span class="tag info">${r.fleet_label || r.fleet_tag}</span>` },
       { title: '名称', render: r => Shell.escapeHtml(r.name || '') },
       { title: '车型', render: r => `<span class="tag grey">${r.vehicle_type}</span>` },
       { title: '能源', render: r => `<span class="tag ${r.energy_type === '纯电' ? 'ok' : 'warn'}">${r.energy_type}</span>` },
