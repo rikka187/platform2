@@ -1,6 +1,6 @@
 """登录、会话、角色权限与操作留痕。
 
-对应论文 4.3.5"权限控制：按调度、仓储、车队、管理等角色分配读写权限，
+权限控制：按调度、仓储、车队、管理等角色分配读写权限，
 关键操作留痕"。
 
 - 口令：PBKDF2-HMAC-SHA256，20 万次迭代，每用户独立随机盐；
@@ -258,7 +258,7 @@ def ensure_default_admin(conn: sqlite3.Connection, username: str = 'admin',
 
 
 def bootstrap(settings=None) -> dict:
-    """启动时调用：建库建表 + 首次导入案例2 种子 + 创建默认管理员。
+    """启动时调用：建库建表 + 首次导入基础数据 + 创建默认管理员。
 
     返回 ``{'counts': {...}, 'admin': 新建的管理员 or None}``。
     """

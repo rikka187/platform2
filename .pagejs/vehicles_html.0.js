@@ -1,7 +1,7 @@
 
 (async () => {
   const payload = await Shell.boot('/vehicles.html', '车辆与运力管理',
-    '选题案例2 表2-5 / 表2-6：车型、载重、容积、成本、能耗；可增删车辆并自定义参数');
+    '车辆主数据：车型、载重、容积、成本、能耗；可增删车辆并自定义参数');
   if (!payload) return;
 
   const mount = document.getElementById('pageMount');
@@ -34,7 +34,7 @@
       <div class="stat"><b>小型 / 中型</b><strong>${s.small ?? 0} / ${s.medium ?? 0}</strong><small>1500kg·15m³ / 7000kg·38m³</small></div>`;
     el('fleetNote').textContent = state.fleet === 'c3'
       ? 'C3 口径：6 辆纯电（5 小型 + 1 中型）+ 2 辆保留燃油（中型 M1、小型 S4）；有效续航已计入冬季衰减 25% 与冷机折损 10%。'
-      : '现状口径：8 辆 4.2 米小型冷藏车 + 2 辆 7.6 米中型冷藏车（选题表2-5）。';
+      : '现状口径：8 辆 4.2 米小型冷藏车 + 2 辆 7.6 米中型冷藏车。';
     el('tabBaseline').className = 'btn' + (state.fleet === 'baseline' ? ' primary' : '');
     el('tabC3').className = 'btn' + (state.fleet === 'c3' ? ' primary' : '');
   }

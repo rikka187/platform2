@@ -1,6 +1,6 @@
-"""方案生成接口：客户→批次→趟次 → 现有求解器 → 选题口径 KPI，并把方案落库。
+"""方案生成接口：客户→批次→趟次 → 路径优化求解器 → 成本核算 KPI，并把方案落库。
 
-情景（论文 4.5.4.2）
+调度情景
 --------------------
 ===== ========================== ============ ==========================
 情景   策略组合                    车队          映射到的求解器情景
@@ -12,7 +12,7 @@ S3    路径优化 + 新能源 + 月台协同  C3            D3（最短等待�
 ===== ========================== ============ ==========================
 
 求解器本身不做任何修改（``simulation.scheduler.solve_scenario``）；
-本模块只负责组织输入、调用求解器、按选题表2-5/2-6 定价、落库与回放。
+本模块只负责组织输入、调用求解器、按平台成本口径定价、落库与回放。
 """
 from __future__ import annotations
 
@@ -145,11 +145,11 @@ def _run_scenario(conn: sqlite3.Connection, scenario: str, scope: str, fleet_tag
     params = planning.load_params(conn)          # 两条求解路径共用
     products = planning.load_products(conn)
     if solver == 'alns':
-        # 论文口径求解器：Clarke-Wright + ALNS + 车辆区间调度（移植自团队原始程序）
+        # 智能优化求解器：Clarke-Wright 节约法 + ALNS + 车辆区间调度
         profile = str(extra.get('profile') or 'case2')
         policy = str(extra.get('departure_policy') or 'ready')
         if profile not in ('case2', 'paper'):
-            raise ApiProblem('算例口径只能是 case2（表2-3/2-4 真实窗口）或 paper（论文基准构造）。')
+            raise ApiProblem('数据口径只能是 case2（实际业务数据）或 paper（标准算例）。')
         if policy not in ('ready', 'optimise'):
             raise ApiProblem('发车策略只能是 ready（固定就绪时刻）或 optimise（窗口内优化）。')
         product_list = ('姜蒜', '鲜面条') if scope == '全部' else (scope,)
@@ -184,7 +184,7 @@ def _run_scenario(conn: sqlite3.Connection, scenario: str, scope: str, fleet_tag
 
     # 情景口径：H0（人工调度基准）里程按 1.22 折算，其余情景为优化后口径
     # （与 simulation/scenarios.py 同源）。核算层必须同口径，否则 S0 与 S1 的结果会完全一样。
-    # 注意：ALNS（论文口径）输出的已经是优化后里程，不能再叠加人工绕行系数。
+    # 注意：ALNS（智能优化）输出的已经是优化后里程，不能再叠加人工绕行系数。
     factor = (SCENARIO_DISTANCE_FACTOR_OVERRIDE if SCENARIO_DISTANCE_FACTOR_OVERRIDE is not None
               else SCENARIO_DISTANCE_FACTOR.get(solver_scenario, 1.0))
     if factor != 1.0:
@@ -198,7 +198,7 @@ def _run_scenario(conn: sqlite3.Connection, scenario: str, scope: str, fleet_tag
 
     kpi = costing.price_plan(plan, products, params, solution.get('schedule'))
     if paper_kpi:
-        # 论文 F1+F2 口径的日总配送成本，作为与论文对照的头条指标
+        # 配送成本口径的日总配送成本，作为方案头条指标
         kpi['delivery_cost'] = paper_kpi['delivery_cost']
         kpi['delivery_cost_breakdown'] = {
             'fixed': paper_kpi['cost_fixed'], 'transport': paper_kpi['cost_transport'],
@@ -220,7 +220,7 @@ def _run_scenario(conn: sqlite3.Connection, scenario: str, scope: str, fleet_tag
                                  dock_count=dock_count or len(plan['solver_data'].get('docks') or []))
     charge_plan = charging.plan_charging(plan['vehicles'], solution.get('schedule', []), params)
 
-    # 求解器口径的原始指标一并保留，便于与论文对照
+    # 求解器原始指标一并保留，便于核对
     solver_kpi = solution.get('kpi') or {}
     run_id = None
     if persist:
@@ -262,7 +262,7 @@ def run_plan(conn: sqlite3.Connection, payload: dict, user: dict) -> Response:
     fleet = str(payload.get('fleet') or '').strip() or None
     solver = str(payload.get('solver') or 'auto').strip().lower()
     if solver not in ('auto', 'heuristic', 'cpsat', 'alns'):
-        raise ApiProblem('求解器只能是 auto / heuristic / cpsat / alns（论文口径）。')
+        raise ApiProblem('求解器只能是 auto / heuristic / cpsat / alns（智能优化）。')
     profile = str(payload.get('profile') or 'case2').strip()
     departure_policy = str(payload.get('departure_policy') or 'ready').strip()
     restarts = payload.get('restarts')
@@ -423,11 +423,11 @@ def export_run(conn: sqlite3.Connection, run_id: int, kind: str) -> Response:
         charging = (detail.get('charging_plan') or {}).get('summary') or {}
         rows = [
             ('方案编号', detail.get('run_id'), ''),
-            ('情景', f"{detail.get('scenario')} {detail.get('scenario_label') or ''}", '论文 4.5.4.2'),
+            ('情景', f"{detail.get('scenario')} {detail.get('scenario_label') or ''}", '调度情景'),
             ('品类 / 车队', f"{detail.get('scope')} / {detail.get('fleet_tag')}", ''),
             ('求解器', detail.get('solver'), ''),
             ('生成时间', detail.get('created_at'), ''),
-            ('日总成本(元)', kpi.get('total_cost'), '表2-5/2-6 口径合计'),
+            ('日总成本(元)', kpi.get('total_cost'), '成本口径合计'),
             ('运输成本(元)', kpi.get('transport_cost'), '出车固定成本 + 里程成本'),
             ('制冷成本(元)', kpi.get('reefer_cost'), '配送 8.5 元/h + 服务 10 元/h'),
             ('时间窗惩罚(元)', kpi.get('penalty_cost'), '早到 5 元/h + 晚到 15 元/h'),
@@ -458,9 +458,9 @@ def export_run(conn: sqlite3.Connection, run_id: int, kind: str) -> Response:
 
 
 def fleet_evaluate(conn: sqlite3.Connection, payload: dict, user: dict) -> Response:
-    """第三章口径：C0 / C3 / C4 车队配置的日全成本与碳排对比。
+    """车队配置对比：C0 / C3 / C4 的日全成本与碳排。
 
-    每个车队各跑一次 ALNS（默认快速档），再把该车队的当日作业量代入
+    每个车队各跑一次智能优化（默认快速档），再把该车队的当日作业量代入
     「折旧 + 能源 + 维护 + 年费」四项口径，并给出碳排与相对 C0 的减排比例。
     """
     profile = str(payload.get('profile') or 'paper').strip()
@@ -471,7 +471,7 @@ def fleet_evaluate(conn: sqlite3.Connection, payload: dict, user: dict) -> Respo
     params = planning.load_params(conn)
     products = planning.load_products(conn)
 
-    # 第三章口径的关键：**同一组配送任务、只换车队配置**，否则各配置各跑一次 ALNS，
+    # 对比口径的关键：**同一组配送任务、只换车队配置**，否则各配置各跑一次 ALNS，
     # 差异会混入随机性（曾出现 8 纯电反而比 6 纯电碳排高）。
     route_plan = None
     if not reoptimize:

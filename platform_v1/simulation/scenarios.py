@@ -32,7 +32,7 @@ SCENARIO_DISTANCE_FACTOR = {
 # 月台等待口径上限：无论滑杆拉到多少，等待时间按 30 分钟截断。
 WAIT_CAP_MIN = 30
 
-# 情景车队口径：C3/D3 在可行时优先纯电，两条长线保留燃油（第三章口径）。
+# 情景车队口径：C3/D3 在可行时优先纯电，两条长线保留燃油。
 NEW_ENERGY_KEEP_FUEL_TRIPS = ('R2', 'R4')
 
 

@@ -1,15 +1,15 @@
-"""成本与 KPI 核算（选题表2-5 / 表2-6 口径）。
+"""成本与 KPI 核算（平台成本口径）。
 
 求解器（启发式 / CP-SAT）只负责"哪辆车跑哪趟、哪个月台、几点装车发车"；
-本模块按选题给定的系数把方案**定价**，因此换口径只改这里，不动算法。
+本模块按参数表给定的系数把方案**定价**，因此换口径只改这里，不动算法。
 
 成本构成
 --------
-1. 运输成本 = Σ(出车固定成本 + 单位里程成本 × 里程)            （表2-5）
-2. 制冷成本 = 8.5 元/h × 行驶时间 + 10 元/h × 服务时间           （表2-6）
-3. 时间窗惩罚 = 5 元/h × 早到时间 + 15 元/h × 晚到时间           （表2-6，对标**期望窗**）
-4. 货损成本 = 配送货损率 0.008 × 货值 + 服务货损率 0.0016 × 货值 （表2-6）
-5. 碳排 = 燃油 2.63 kgCO₂/L × 油耗；纯电 0.1564 kgCO₂/kWh × 电耗（第三章）
+1. 运输成本 = Σ(出车固定成本 + 单位里程成本 × 里程)
+2. 制冷成本 = 8.5 元/h × 行驶时间 + 10 元/h × 服务时间
+3. 时间窗惩罚 = 5 元/h × 早到时间 + 15 元/h × 晚到时间（对标**期望窗**）
+4. 货损成本 = 配送货损率 0.008 × 货值 + 服务货损率 0.0016 × 货值
+5. 碳排 = 燃油 2.63 kgCO₂/L × 油耗；纯电 0.1564 kgCO₂/kWh × 电耗
 
 KPI：总成本、成本构成、准时率、车辆利用率、平均装载率、总里程、总碳排、
 月台等待、订单到发车周期。
@@ -35,7 +35,7 @@ DEFAULTS = {
     'maintenance_medium': 140.0,
 }
 
-# 各车型的能耗口径（第三章）
+# 各车型的能耗口径
 ENERGY = {
     ('小型', '燃油'): {'fuel_l_per_km': 0.118, 'reefer_l_per_h': 0.4},
     ('小型', '纯电'): {'kwh_per_km': 0.42, 'reefer_kwh_per_h': 1.4},
@@ -59,7 +59,7 @@ def energy_of(vehicle_type: str, energy_type: str) -> Dict[str, float]:
 
 
 def goods_value(trip_customers: List[dict], products: Dict[str, dict]) -> float:
-    """货值 = Σ 各品类需求量 × 单价（表2-6：生姜 3.0、大蒜 3.2、鲜面条 3.5）。"""
+    """货值 = Σ 各品类需求量 × 单价（生姜 3.0、大蒜 3.2、鲜面条 3.5）。"""
     total = 0.0
     for customer in trip_customers:
         for demand in customer.get('demands', []):
@@ -165,7 +165,7 @@ def price_trip(trip: dict, plan_customers: Dict[str, dict], products: Dict[str, 
 
 def price_plan(plan: dict, products: Dict[str, dict], params: Dict[str, str],
                schedule: Optional[List[dict]] = None, used_vehicles: Optional[List[str]] = None) -> dict:
-    """对整套方案定价，返回 KPI（与论文 4.7.2 的指标口径一致）。
+    """对整套方案定价，返回 KPI（与平台评价指标口径一致）。
 
     若给出求解器的 ``schedule``，则以**求解器实际分配的车辆**为准计算能耗与碳排
     （求解器会做车辆-趟次匹配与多趟次复用，比预处理层的初始分配更准）。

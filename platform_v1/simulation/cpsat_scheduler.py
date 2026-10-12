@@ -65,7 +65,7 @@ def _compatible(trip: dict[str, Any], vehicle: dict[str, Any], scenario: str) ->
     if vehicle['vehicle_type'] != required_type:
         return False
 
-    # 第三章口径：C3/D3 中两条长线（R2、R4）保留燃油车。
+    # C3/D3 中两条长线（R2、R4）保留燃油车。
     if scenario in {'C3', 'D3'} and trip['trip_id'] in NEW_ENERGY_KEEP_FUEL_TRIPS:
         return vehicle['energy_type'] == '燃油'
     return True

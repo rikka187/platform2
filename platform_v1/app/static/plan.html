@@ -26,7 +26,7 @@
 <script>
 (async () => {
   const payload = await Shell.boot('/plan.html', '路径优化与方案生成',
-    '方案工作台：客户→批次→趟次预处理 + 平台现有求解器（启发式/CP-SAT）+ 选题表2-5/2-6 成本口径 · 地图/月台/充电/导出都在本页');
+    '方案工作台：客户→批次→趟次 + 路径优化（启发式 / CP-SAT / 智能优化）+ 成本核算 · 地图、月台、充电、导出都在本页');
   if (!payload) return;
 
   const mount = document.getElementById('pageMount');
@@ -41,7 +41,7 @@
             <option value="全部" selected>全部（两品类联合、共享车辆池）</option>
             <option value="姜蒜">姜蒜（30 客户）</option>
             <option value="鲜面条">鲜面条（30 客户）</option></select></div>
-        <div class="field" style="min-width:230px"><label>情景（论文 4.5.4.2）</label>
+        <div class="field" style="min-width:230px"><label>调度情景</label>
           <select id="pScenario">
             <option value="S0">S0 人工调度基准（现状车队）</option>
             <option value="S1">S1 仅路径优化（现状车队）</option>
@@ -58,13 +58,13 @@
           </select></div>
         <div class="field" style="min-width:230px"><label>求解方式</label>
           <select id="pSolver">
-            <option value="alns" selected>论文口径 ALNS（节约法 + 自适应大邻域）</option>
+            <option value="alns" selected>智能路径优化（节约法 + 自适应大邻域搜索）</option>
             <option value="auto">自动（优先 CP-SAT，出月台/装车时序）</option>
             <option value="heuristic">仅启发式</option><option value="cpsat">仅 CP-SAT</option></select></div>
-        <div class="field" style="min-width:210px"><label>算例口径</label>
+        <div class="field" style="min-width:210px"><label>数据口径</label>
           <select id="pProfile">
-            <option value="paper" selected>论文基准构造（复现 S0 4226.68 元）</option>
-            <option value="case2">表2-3/2-4 真实窗口</option></select></div>
+            <option value="paper" selected>标准算例（基准口径）</option>
+            <option value="case2">实际业务数据</option></select></div>
         <div class="field" style="min-width:190px"><label>发车时刻策略</label>
           <select id="pPolicy">
             <option value="ready" selected>按批次起送（与原程序一致）</option>
@@ -90,7 +90,7 @@
     </div>
 
     <div class="grid k2">
-      <div class="card"><div class="card-head"><h3>成本构成（选题表2-5/2-6）</h3></div><div class="bars" id="costBars"></div></div>
+      <div class="card"><div class="card-head"><h3>成本构成</h3></div><div class="bars" id="costBars"></div></div>
       <div class="card"><div class="card-head"><h3>多情景评价摘要</h3><span class="muted" id="cmpHint">点上方「S0→S3 情景对比」；五维评分与雷达图见<a href="/scenarios.html">多情景评价</a></span></div><div id="compare"></div></div>
     </div>
 
@@ -240,14 +240,14 @@
     if (!r) { el('kpis').innerHTML = '<div class="empty">尚未生成方案</div>'; return; }
     const k = r.kpi;
     el('kpis').innerHTML = `
-      <div class="stat"><b>${k.delivery_cost ? '日总配送成本' : '日总成本'}</b><strong>${k.delivery_cost || k.total_cost} 元</strong><small>${k.delivery_cost ? '论文 F1+F2 口径：出车 + 里程 + 制冷 + 时间窗惩罚' : r.scenario_label}</small></div>
-      <div class="stat"><b>扩展口径总成本</b><strong>${k.total_cost} 元</strong><small>含维护 / 货损 / 能耗 · 碳排 ${k.carbon_kg} kg</small></div>
+      <div class="stat"><b>${k.delivery_cost ? '日总配送成本' : '日总成本'}</b><strong>${k.delivery_cost || k.total_cost} 元</strong><small>${k.delivery_cost ? '配送成本口径：出车 + 里程 + 制冷 + 时间窗惩罚' : r.scenario_label}</small></div>
+      <div class="stat"><b>综合成本</b><strong>${k.total_cost} 元</strong><small>含维护 / 货损 / 能耗 · 碳排 ${k.carbon_kg} kg</small></div>
       <div class="stat"><b>准时率</b><strong>${k.on_time_rate}%</strong><small>${k.on_time_customers}/${k.customers} 个客户</small></div>
       <div class="stat"><b>总里程 / 趟次</b><strong>${k.total_distance_km} km</strong><small>${k.trips} 趟次 · 用车 ${k.used_vehicles} 辆</small></div>
       <div class="stat"><b>碳排放</b><strong>${k.carbon_kg} kg</strong><small>装载率 ${k.avg_load_rate}% · 利用率 ${k.vehicle_utilization}%</small></div>`;
     el('runHint').textContent = `求解器：${r.solver_label || r.solver || '-'}`
     + `${r.solver_status ? '（' + r.solver_status + '）' : ''} · 车队 ${r.fleet_label || r.fleet_tag}`
-    + `${r.profile ? ' · 算例口径 ' + (r.profile === 'paper' ? '论文基准构造' : '表2-3/2-4 真实窗口') : ''}`;
+    + `${r.profile ? ' · 数据口径 ' + (r.profile === 'paper' ? '标准算例' : '实际业务数据') : ''}`;
   }
 
   function renderCost() {

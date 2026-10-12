@@ -14,7 +14,7 @@
 <script>
 (async () => {
   const payload = await Shell.boot('/users.html', '用户与操作留痕',
-    '按角色分配读写权限，关键操作全部留痕（论文 4.3.5 权限控制）');
+    '按角色分配读写权限，关键操作全部留痕');
   if (!payload) return;
 
   const mount = document.getElementById('pageMount');

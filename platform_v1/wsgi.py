@@ -31,7 +31,7 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
 from app import api, auth  # noqa: E402
 from app.config import get_settings  # noqa: E402
 
-# 与 server.py 保持一致：WSGI 路径同样要在启动时建库 + 导入案例2 种子数据 + 确保默认管理员存在。
+# 与 server.py 保持一致：WSGI 路径同样要在启动时建库 + 导入基础数据 + 确保默认管理员存在。
 # 否则经 gunicorn / 宝塔「Python 项目」启动时数据库不存在，登录接口会直接 500。
 try:
     _boot = auth.bootstrap(get_settings())

@@ -187,7 +187,7 @@
       { title: '月台冲突', render: r => r.metrics.dock_conflicts }
     ];
     el('matrix').innerHTML = Shell.table(columns, data.evaluation.items);
-    el('matrixHint').textContent = '口径：选题表2-5/2-6 成本 + Haversine 里程；S0 含 1.22 人工调度绕行系数';
+    el('matrixHint').textContent = '口径：配送成本（出车 + 里程 + 制冷 + 时间窗惩罚）+ Haversine 里程；S0 含 1.22 人工调度绕行系数';
   }
 
   function renderDelta() {

@@ -14,7 +14,7 @@
 <script>
 (async () => {
   const payload = await Shell.boot('/customers.html', '客户数据管理',
-    '选题案例2 表2-3 / 表2-4：坐标、需求量、期望与可接受时间窗、服务时间、批次归属');
+    '客户主数据：坐标、需求量、期望与可接受时间窗、服务时间、批次归属');
   if (!payload) return;
 
   const mount = document.getElementById('pageMount');
@@ -58,8 +58,8 @@
     const s = state.summary || {};
     el('stats').innerHTML = `
       <div class="stat"><b>客户总数</b><strong>${s.total ?? 0}</strong><small>当前筛选结果</small></div>
-      <div class="stat"><b>姜蒜客户</b><strong>${(s.by_scope || {})['姜蒜'] ?? 0}</strong><small>表2-3</small></div>
-      <div class="stat"><b>鲜面条客户</b><strong>${(s.by_scope || {})['鲜面条'] ?? 0}</strong><small>表2-4</small></div>
+      <div class="stat"><b>姜蒜客户</b><strong>${(s.by_scope || {})['姜蒜'] ?? 0}</strong><small>姜蒜业务</small></div>
+      <div class="stat"><b>鲜面条客户</b><strong>${(s.by_scope || {})['鲜面条'] ?? 0}</strong><small>鲜面条业务</small></div>
       <div class="stat"><b>合计需求 / 体积</b><strong>${Number(s.total_kg ?? 0).toFixed(1)} kg</strong><small>${Number(s.total_m3 ?? 0).toFixed(3)} m³（按品类密度折算）</small></div>`;
   }
 

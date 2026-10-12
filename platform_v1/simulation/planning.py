@@ -1,4 +1,4 @@
-"""客户 → 批次 → 趟次 预处理（把案例2 的客户点转成现有求解器能吃的输入）。
+"""客户 → 批次 → 趟次 预处理（把客户点转成求解器输入）。
 
 **这不是新的求解算法**：路线分组用"批次归属 + 最近邻 + 载重/容积/时间窗可行性"
 这一确定性规则生成候选趟次；车辆-月台-装车时序仍由平台原有的
@@ -7,11 +7,11 @@
 口径
 ----
 * 距离：Haversine（``simulation.geo``，R=6371.0 km，2 位小数）；
-* 行驶时间：距离 ÷ 平均车速（选题表2-6，40 km/h）；
+* 行驶时间：距离 ÷ 平均车速（40 km/h）；
 * 装载双约束：重量 ≤ 额定载重 且 体积 ≤ 货厢容积（体积由品类密度折算）；
 * 时间窗：期望窗（软）与可接受窗（硬）。到达早于期望窗 → 早到等待；
   晚于可接受窗 → 该点在本趟不可行，另起一趟；单点仍不可行则记为不可行并交人工处理；
-* 批次归属来自表2-3/表2-4 的"批次归属"列，起送时刻即该批次的最早发车时间。
+* 批次归属取自客户主数据，起送时刻即该批次的最早发车时间。
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from simulation.geo import DEFAULT_SPEED_KMH, haversine_km, round_km
 # 与求解器对齐的口径
 PREP_MIN_DEFAULT = 15          # 备份（拣货/组盘）标准时长
 DOCK_DEFAULT_COUNT = 12        # 抽象月台池大小（不铺 252 个真实月台）
-DOCK_OPEN_MIN = 3 * 60         # 凌晨 3:00 起可装车（选题：装车高峰 03:00-07:00）
+DOCK_OPEN_MIN = 3 * 60         # 凌晨 3:00 起可装车（装车高峰 03:00-07:00）
 DOCK_CLOSE_MIN = 12 * 60       # 12:00 收工
 TURNAROUND_MIN = 30            # 车辆返场后的周转时间（与 CP-SAT 的 turnover_min 对齐）
 CHARGE_WINDOW = ('01:20', '07:00')   # 谷段（01:00-07:00）
@@ -98,7 +98,7 @@ def _pick_vehicle(load_kg: float, volume_m3: float, vehicles: List[dict],
                   distance_km: Optional[float] = None) -> Optional[dict]:
     """选能装下、且续航够用的最小车型（小型优先，其次中型）。
 
-    ``distance_km`` 给出时按第三章口径做**新能源可行路线判定**：纯电车的
+    ``distance_km`` 给出时做**新能源可行路线判定**：纯电车的
     有效续航（已计入冬季衰减与冷机折损）必须覆盖本趟里程，否则只能改用燃油车。
     """
     order = {'小型': 0, '中型': 1}
@@ -126,7 +126,7 @@ def build_trips(customers: List[dict], vehicles: List[dict], params: Dict[str, s
     for customer in customers:
         batches.setdefault(customer.get('batch_code') or '未分批', []).append(customer)
 
-    # 批次起送时刻（表2-3/2-4 的"批次一 04:30 起送"），由 build_plan 注入
+    # 批次起送时刻（如"批次一 04:30 起送"），由 build_plan 注入
     batch_depart = params.get('_batch_depart') or {}
     if not isinstance(batch_depart, dict):
         batch_depart = {}
@@ -268,7 +268,7 @@ def _clock_text(minutes) -> str:
 
 
 def _range_ok(vehicle: dict, distance_km: float) -> bool:
-    """新能源可行路线判定（第三章 3.4.2）：纯电有效续航必须覆盖本趟里程。"""
+    """新能源可行路线判定：纯电有效续航必须覆盖本趟里程。"""
     if vehicle.get('energy_type') != '纯电':
         return True
     effective = float(vehicle.get('effective_range_km') or vehicle.get('range_km') or 0)
@@ -281,7 +281,7 @@ def assign_vehicles(trips: List[dict], vehicles: List[dict],
 
     规则（确定性，可复现）：
     1. 只有**装得下**（载重+容积双约束）且**续航够**的车辆才有资格；
-    2. 优先复用"已经返回、可以再跑一趟"的车（对应论文的多趟次复用），
+    2. 优先复用"已经返回、可以再跑一趟"的车（多趟次复用），
        其次是还没用过的车，最后才是最早空出来的车；
     3. 车辆返回时刻 = 发车 + 趟次时长 + 周转时间。
     """
@@ -342,7 +342,7 @@ def optimise_departure(stops: List[Tuple[dict, float]], depart_after: int, speed
                        horizon: int = 300) -> dict:
     """挑选最优发车时刻——批次起送时刻是**就绪时间**，允许延后。
 
-    与团队求解程序的口径一致（"案例批次时间'X 时及以后发车'即就绪时间，允许延后"）：
+    口径为"批次时间'X 时及以后发车'即就绪时间，允许延后"：
     在 [depart_after, depart_after+horizon] 内按 step 分钟扫描，只接受**不违反可接受
     时间窗**的候选，取"早到+晚到惩罚"最小的最早时刻（确定性、可复现）。
     若全部候选都不可行，退回就绪时刻。
@@ -497,7 +497,7 @@ def build_plan(conn: sqlite3.Connection, scope: str, fleet_tag: str,
         dc = (float(params.get('dc_lon', 104.26)), float(params.get('dc_lat', 30.85)))
     if dock_count:
         params['_dock_count'] = dock_count
-    # 本品类各批次的最早发车时刻（表2-3/2-4 的"批次 N（HH:MM 起送）"）
+    # 本品类各批次的最早发车时刻（"批次 N（HH:MM 起送）"）
     params['_batch_depart'] = {
         row['code']: row['depart_after']
         for row in conn.execute('SELECT code, depart_after FROM batches WHERE product_scope = ?', (scope,))

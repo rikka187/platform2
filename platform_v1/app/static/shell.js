@@ -105,7 +105,7 @@ const Shell = (() => {
       </div>
       ${links}
       <div class="foot">
-        选题案例2口径 · Haversine 距离<br>
+        距离口径 Haversine · 半径 6371.0 km<br>
         <span id="shellGeo">距离矩阵校核中…</span>
       </div>`;
     side.querySelectorAll('[data-soon]').forEach(node => node.addEventListener('click', event => {

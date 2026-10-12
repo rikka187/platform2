@@ -1,4 +1,4 @@
-"""数据层：SQLite 库结构、连接管理、案例2 种子数据导入。
+"""数据层：SQLite 库结构、连接管理、基础数据导入。
 
 设计原则
 --------
@@ -299,7 +299,7 @@ def _read_csv(path: Path) -> list:
 # 初始化与种子
 # --------------------------------------------------------------------------
 def init_db(settings: Optional[Settings] = None, seed: bool = True) -> dict:
-    """建表 + 首次导入案例2 种子数据。返回各表行数概览。"""
+    """建表 + 首次导入基础数据。返回各表行数概览。"""
     conn = connect(settings)
     try:
         conn.executescript(SCHEMA)
@@ -311,7 +311,7 @@ def init_db(settings: Optional[Settings] = None, seed: bool = True) -> dict:
             # 由现状车队派生"10 辆里换 6 辆纯电"的口径（fleet_tag = c3_10），
             # 与团队参数表的 8 辆口径并存，便于在页面上直接对比两种替换方案。
             created['vehicles_c3_10'] = seed_fleet_variant(conn)
-            # 第三章备选升级口径 C4：8 纯电 + 2 保留燃油（纯电比例高于 C3）
+            # 备选升级口径 C4：8 纯电 + 2 保留燃油（纯电比例高于 C3）
             created['vehicles_c4'] = seed_fleet_variant(conn, target_fleet='c4', ev_count=8)
             created['customers'] = seed_customers(conn)
             created['batches'] = seed_batches(conn)
@@ -399,7 +399,7 @@ def seed_fleet_variant(conn: sqlite3.Connection, source_fleet: str = 'baseline',
     在「路径与方案」里切换即可对比，不必等人工确认。
 
     规则（确定性）：按编号排序取前 ev_count 辆作为被替换对象，沿用其车型与容积，
-    能耗换成纯电口径（第三章：小型 0.42 kWh/km、中型 1.96 kWh/km），
+    能耗换成纯电口径（小型 0.42 kWh/km、中型 1.96 kWh/km），
     有效续航按同型号纯电车取值（小型 135 km、中型 189 km）。
     """
     existing = conn.execute('SELECT COUNT(*) FROM vehicles WHERE fleet_tag = ?',

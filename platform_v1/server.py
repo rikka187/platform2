@@ -346,7 +346,7 @@ def main(argv=None) -> int:
 
     api.clear_caches()
 
-    # 建库建表 + 首次导入案例2 种子 + 创建默认管理员
+    # 建库建表 + 首次导入基础数据 + 创建默认管理员
     try:
         boot = auth.bootstrap(settings)
         if boot.get('admin'):
