@@ -100,7 +100,7 @@ const Shell = (() => {
       </a>`).join('');
     side.innerHTML = `
       <div class="brand">
-        <div class="mark">YL</div>
+        <img class="mark-logo" src="/logo.png" alt="银犁物流" title="银犁物流城市冷链仓配一体化协同平台">
         <div><b>银犁物流</b><span>城市冷链仓配一体化协同平台</span></div>
       </div>
       ${links}
